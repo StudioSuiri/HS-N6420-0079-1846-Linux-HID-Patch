@@ -1,0 +1,89 @@
+From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
+From: StudioSuiri <studiosuiri@users.noreply.github.com>
+Date: Mon, 7 Sep 2026 16:15:00 -0500
+Subject: [PATCH] HID: usbhid: fix Mayflash GameCube adapter 0079:1846 probe error -71
+
+The Mayflash / DragonRise 4-port GameCube Controller Adapter (VID:PID 0079:1846)
+stalls upon receiving a USB HID class SET_IDLE request during usbhid_parse()
+and post_reset(). On modern xHCI hosts, this stall results in EPROTO (-71)
+when attempting to read the report descriptor, preventing any input device
+from being registered.
+
+Furthermore, the firmware supplies a report descriptor of 198 bytes that
+only defines Report IDs 1 and 2, even though the device continuously outputs
+data for all 4 physical ports (Report IDs 1, 2, 3, and 4) on interrupt endpoint
+0x81. Without HID_QUIRK_ALWAYS_POLL, polling can be suspended when no key
+is considered held down.
+
+Fix this by:
+1. Skipping hid_set_idle() for 0079:1846 in both parse and post-reset paths.
+2. Expanding the 198-byte descriptor to 396 bytes to register all 4 controller ports.
+3. Enabling HID_QUIRK_ALWAYS_POLL for 0079:1846 to maintain continuous packet delivery.
+
+Signed-off-by: StudioSuiri <studiosuiri@users.noreply.github.com>
+---
+ drivers/hid/usbhid/hid-core.c | 31 +++++++++++++++++++++++++++++--
+ 1 file changed, 29 insertions(+), 2 deletions(-)
+
+--- a/drivers/hid/usbhid/hid-core.c
++++ b/drivers/hid/usbhid/hid-core.c
+@@ -1049,7 +1049,10 @@ static int usbhid_parse(struct hid_device *hid)
+ 	if (!rdesc)
+ 		return -ENOMEM;
+ 
+-	hid_set_idle(dev, interface->desc.bInterfaceNumber, 0, 0);
++	if (!(le16_to_cpu(dev->descriptor.idVendor) == 0x0079 && le16_to_cpu(dev->descriptor.idProduct) == 0x1846))
++		hid_set_idle(dev, interface->desc.bInterfaceNumber, 0, 0);
++	else
++		dev_info(&dev->dev, "usbhid: skipping hid_set_idle for 0079:1846\n");
+ 
+ 	ret = hid_get_class_descriptor(dev, interface->desc.bInterfaceNumber,
+ 			HID_DT_REPORT, rdesc, rsize);
+@@ -1059,6 +1062,22 @@ static int usbhid_parse(struct hid_device *hid)
+ 		goto err;
+ 	}
+ 
++	if (le16_to_cpu(dev->descriptor.idVendor) == 0x0079 &&
++	    le16_to_cpu(dev->descriptor.idProduct) == 0x1846 && rsize == 198) {
++		u8 *rdesc4 = kmalloc(396, GFP_KERNEL);
++		if (rdesc4) {
++			/* Copy report 1 (99 bytes) to report 1 and 3 */
++			memcpy(rdesc4, rdesc, 99);
++			memcpy(rdesc4 + 99, rdesc + 99, 99); /* Report 2 */
++			memcpy(rdesc4 + 198, rdesc, 99);     /* Report 3 */
++			rdesc4[198 + 7] = 0x03;              /* Report ID 3 */
++			memcpy(rdesc4 + 297, rdesc, 99);     /* Report 4 */
++			rdesc4[297 + 7] = 0x04;              /* Report ID 4 */
++			kfree(rdesc);
++			rdesc = rdesc4;
++			rsize = 396;
++			dev_info(&dev->dev, "usbhid: expanded 0079:1846 descriptor to 4 ports (396 bytes)\n");
++		}
++	}
+ 	ret = hid_parse_report(hid, rdesc, rsize);
+ 	kfree(rdesc);
+ 	if (ret) {
+@@ -1072,6 +1091,12 @@ static int usbhid_parse(struct hid_device *hid)
+ 			"%u unsupported optional hid class descriptors\n",
+ 			(int)(hdesc->bNumDescriptors - 1));
+ 
++	if (le16_to_cpu(dev->descriptor.idVendor) == 0x0079 &&
++	    le16_to_cpu(dev->descriptor.idProduct) == 0x1846) {
++		quirks |= HID_QUIRK_ALWAYS_POLL;
++		dev_info(&dev->dev, "usbhid: set HID_QUIRK_ALWAYS_POLL for 0079:1846\n");
++	}
++
+ 	hid->quirks |= quirks;
+ 
+ 	return 0;
+@@ -1578,7 +1603,8 @@ static int usbhid_post_reset(struct usb_interface *intf)
+ 	clear_bit(HID_RESET_PENDING, &usbhid->iofl);
+ 	clear_bit(HID_CLEAR_HALT, &usbhid->iofl);
+ 	spin_unlock_irq(&usbhid->lock);
+-	hid_set_idle(dev, intf->cur_altsetting->desc.bInterfaceNumber, 0, 0);
++	if (!(le16_to_cpu(dev->descriptor.idVendor) == 0x0079 && le16_to_cpu(dev->descriptor.idProduct) == 0x1846))
++		hid_set_idle(dev, intf->cur_altsetting->desc.bInterfaceNumber, 0, 0);
+ 
+ 	hid_restart_io(hid);
+ 
+-- 
