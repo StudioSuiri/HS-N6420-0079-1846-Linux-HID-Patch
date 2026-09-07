@@ -1,17 +1,27 @@
-# Mayflash 0079:1846 Linux HID Fix
+# Mayflash / DragonRise `0079:1846` Linux HID Fix
 
-> **A small, targeted Linux `usbhid` workaround that turns a stubborn `0079:1846` GameCube/N64 adapter into real Linux controller input.**
+> **A tiny, targeted Linux `usbhid` workaround that turns a stubborn N64 controller converter into real Linux input.**
 
 [![Linux](https://img.shields.io/badge/Linux-6.14%20tested-333?logo=linux)](https://kernel.org/)
 [![USB](https://img.shields.io/badge/USB-0079%3A1846-333)](https://usb-ids.gowdy.us/read/UD/0079/1846)
+[![Patch](https://img.shields.io/badge/kernel%20patch-GPL--2.0-only-orange)](NOTICE)
 [![Scripts](https://img.shields.io/badge/scripts-MIT-blue)](LICENSE)
-[![Kernel patch](https://img.shields.io/badge/kernel%20patch-GPL--2.0-only-orange)](NOTICE)
 
 ---
 
 ## The short version
 
-Some `0079:1846` adapters are visible to Linux at the USB level, but the generic HID driver fails during initialization:
+This project exists because a cheap N64 controller converter produced a wonderfully annoying Linux problem:
+
+```text
+Linux sees the USB device.
+Linux knows it is HID.
+Linux knows the 0079:1846 device family.
+
+...and then usbhid dies with -71.
+```
+
+The exact failure was:
 
 ```text
 0079:1846 DragonRise Inc. GameCube Controller Adapter
@@ -20,294 +30,211 @@ usbhid 1-9:1.0: can't add hid device: -71
 usbhid 1-9:1.0: probe with driver usbhid failed with error -71
 ```
 
-When that happens, Linux sees the USB device but never turns it into usable controller input.
+The result was no usable controller device, no `evdev` input and nothing for Mupen64Plus to bind to.
 
-This repository contains a targeted patch for:
+We traced the failure into Linux's generic HID initialization path and built a deliberately narrow compatibility patch for **VID:PID `0079:1846`**. The patched module was tested with a real N64 controller and Mupen64Plus on Linux `6.14.0-37-generic`.
+
+**It works.**
+
+---
+
+## The hardware that started this project
+
+This is the actual adapter used for the investigation — **not a stock Mayflash product photo**:
+
+![Actual HS-N6420 N64 controller converter](docs/images/hs-n6420-real.jpg)
+
+The box identifies the unit as:
 
 ```text
-drivers/hid/usbhid/hid-core.c
+N64 Controller Converter
+Model: HS-N6420
 ```
 
-It is packaged as an **out-of-tree `usbhid.ko` build**, so users do **not** need to rebuild the entire Linux kernel.
+The physical shell is a generic Chinese-market design. We are **not** claiming that every HS-N6420 is electrically identical to every Mayflash/DragonRise unit. What matters for this project is the USB identity observed from the working device:
 
-The fix was developed and verified with a physical N64 controller, Mupen64Plus and a Linux `6.14.0-37-generic` system. The final result was real working N64 input, including the analog stick, C-buttons, triggers, Z, Start and D-pad.
+```text
+VID:PID       0079:1846
+Manufacturer  mayflash limited
+Product       GameCube Controller Adapter
+```
 
----
+The safest identification rule is therefore:
 
-## Why this exists
+> **Do not identify the hardware by its plastic shell. Identify it by VID:PID and USB descriptors.**
 
-This started with a very ordinary retro-gaming problem:
-
-> **"Linux can see my N64 adapter. Why can't I use the controller?"**
-
-The adapter appeared in `lsusb`, but the kernel immediately rejected it with error `-71`. There was no controller in `/proc/bus/input/devices`, no useful `evdev` stream, and Mupen64Plus had nothing to bind to.
-
-The obvious suspect was a missing controller driver. That turned out to be the wrong layer.
-
-Linux already has Mayflash support through `hid_mf`, and upstream Linux has long known about the `0079:1846` family. The failure happened earlier: **generic `usbhid` could not successfully initialize this particular device/firmware behavior.**
-
-The eventual workaround was deliberately narrow:
-
-1. skip the broken HID `SET_IDLE` request for this exact VID:PID;
-2. reconstruct the missing four-port report description;
-3. force continuous HID polling;
-4. build only the affected `usbhid` module instead of an entire kernel.
-
-And it worked.
+The HS-N6420 model information is also independently listed by its manufacturer/distributor as an N64 Controller Converter supporting N64 controllers on PC/Switch. citeturn0search13
 
 ---
 
-## Hardware: identify the USB device, not the plastic
-
-The tested adapter reports:
+## What we actually observed
 
 | Property | Observed value |
 |---|---|
 | USB VID | `0079` |
 | USB PID | `1846` |
-| USB database name | DragonRise Inc. |
-| Manufacturer string | `mayflash limited` |
-| Product string | `GameCube Controller Adapter` |
+| USB database identity | DragonRise Inc. |
+| USB manufacturer string | `mayflash limited` |
+| USB product string | `GameCube Controller Adapter` |
 | USB version | 2.00 |
 | HID version | 1.10 |
 | Interface | HID class (`03`) |
-| Interrupt IN endpoint | `0x81` |
-| IN packet size | 37 bytes |
-| OUT endpoint | `0x02` |
-| OUT packet size | 5 bytes |
-| Report descriptor observed | 198 bytes before workaround |
-| Successful test kernel | `6.14.0-37-generic` |
+| Interrupt IN endpoint | `0x81` / 37 bytes |
+| OUT endpoint | `0x02` / 5 bytes |
+| Report descriptor | 198 bytes before workaround |
+| Successful kernel | `6.14.0-37-generic` |
+| Emulator | Mupen64Plus |
+| Controller | Generic translucent-green N64 controller |
 
-The physical enclosure is **not** the identification criterion.
+The public Linux history confirms that `0079:1846` is a known Mayflash/DragonRise GameCube-adapter ID and that Linux already has multi-input support for its four controller ports. citeturn0search0turn0search3
 
-The adapter used in development was sold as a generic N64 controller adapter and its physical shell is different from some commonly photographed Mayflash housings. Nevertheless, Linux identified it as `mayflash limited` / `0079:1846`, and the adapter worked after the fix.
-
-There are inexpensive rebrands/clones and multiple physical designs in this ecosystem. The safest rule is therefore:
-
-```text
-Do not identify the device by its shell.
-Identify it by VID:PID and USB descriptors.
-```
-
-The public USB ID database lists `0079:1846` as a GameCube controller adapter and associates it with the HongHao/DragonRise family:
-
-- https://usb-ids.gowdy.us/read/UD/0079/1846
-
-The marketplace listing used during the investigation was a generic N64 controller adapter listing:
-
-- https://www.mercadolibre.com.co/adaptador-de-controlador-portatil-n64-adaptador-de-mando-n6/p/MCO2063486131
-
-**Do not buy hardware solely because an enclosure looks similar. Check `lsusb` and look for `0079:1846`.**
+That was an important clue: **the problem was not simply “Linux has no driver for this thing.”**
 
 ---
 
-## What failed before the patch
+# The story
 
-USB enumeration itself worked:
+This started as a completely ordinary retro-gaming task: get an N64 controller working on the Linux machine.
+
+We plugged in the converter.
+
+`lsusb` immediately saw it:
 
 ```text
 Bus 001 Device 005: ID 0079:1846 DragonRise Inc. GameCube Controller Adapter
 ```
 
-HID probing did not:
+So far, so good.
+
+Then Linux tried to initialize the HID interface and responded:
 
 ```text
 usbhid 1-9:1.0: can't add hid device: -71
-usbhid 1-9:1.0: probe with driver usbhid failed with error -71
 ```
 
-The practical result was:
+There was no controller in `/proc/bus/input/devices`. No joystick. No useful `evdev` stream. Mupen64Plus had nothing to work with.
 
-- no usable controller input;
-- no Mayflash entry in `/proc/bus/input/devices`;
-- no joystick device for the adapter;
-- no usable `evdev` stream;
-- Mupen64Plus could not see the physical controller.
+We initially suspected the Mayflash driver. Linux already had `hid_mf`, though, and reloading it did nothing.
 
-Reloading the already-present `hid_mf` module did not solve the problem because the failure occurred before normal HID device handling could become useful.
+That was the turning point.
+
+The failure was happening **before the normal HID device path could become useful**.
+
+We went down into `usbhid`, inspected the actual USB descriptors, checked the kernel's existing `hid_mf` support and eventually isolated the device-specific initialization behavior that was killing enumeration.
+
+The final workaround does three important things:
+
+1. **Skip the broken HID `SET_IDLE` request** for this exact VID:PID.
+2. **Reconstruct the four-port HID report description** when the known 198-byte descriptor is encountered.
+3. **Force continuous HID polling** with `HID_QUIRK_ALWAYS_POLL`.
+
+Then we built only the affected `usbhid.ko` module instead of rebuilding the entire Linux kernel.
+
+And finally:
+
+**the N64 controller worked.**
+
+Not “Linux sees it.”
+
+Not “maybe SDL can see it.”
+
+The physical buttons, stick, C-buttons, Z, triggers, Start and D-pad generated real input and Mupen64Plus could use them.
+
+We even caught and fixed a separate emulator-side mistake where the C-button axes were crossed, which made Mario's camera behave strangely. That was configuration, not a kernel problem.
+
+That is the entire reason this repository exists: so the next person does not have to spend an evening repeating the same kernel archaeology.
 
 ---
 
-## Root cause observed during the investigation
+# What actually failed?
 
-The failure was traced to the adapter's HID initialization behavior.
-
-### 1. `SET_IDLE` breaks initialization
-
-During normal `usbhid` parsing, Linux sends the standard HID `SET_IDLE` class request. This adapter firmware does not handle that request correctly.
-
-The observed sequence was effectively:
-
-```text
-SET_IDLE
-   ↓
-adapter firmware rejects/stalls the request
-   ↓
-USB/HID transfer is left in an error state
-   ↓
-GET_REPORT_DESCRIPTOR fails
-   ↓
--EPROTO / -71
-   ↓
-usbhid probe aborts
-```
-
-The workaround skips `hid_set_idle()` for `0079:1846` during both normal parsing and post-reset recovery.
-
-### 2. The factory HID descriptor is incomplete for the four-port behavior
-
-The device reports a 198-byte HID descriptor, while the observed adapter behavior contains four controller reports.
-
-The workaround expands the descriptor to 396 bytes and duplicates the existing report definitions for the additional report IDs.
-
-This allows Linux to represent the four physical controller ports independently.
-
-### 3. Continuous polling is required
-
-The patch also enables:
-
-```c
-HID_QUIRK_ALWAYS_POLL
-```
-
-for `0079:1846`, keeping the adapter's interrupt input path active.
-
----
-
-## What the patch changes
-
-The repository's kernel patch is intentionally small:
-
-```text
-1 file changed
-29 insertions(+)
-2 deletions(-)
-```
-
-It modifies only:
-
-```text
-drivers/hid/usbhid/hid-core.c
-```
-
-Specifically it:
-
-1. skips `hid_set_idle()` for VID `0079`, PID `1846`;
-2. expands a 198-byte report descriptor to 396 bytes when the expected descriptor is detected;
-3. creates report IDs 3 and 4 for the additional ports;
-4. enables `HID_QUIRK_ALWAYS_POLL` for the device;
-5. applies the same `SET_IDLE` exception during post-reset recovery.
-
-The exact patch is here:
-
-[`patches/0001-mayflash-0079-1846-usbhid-fix.patch`](patches/0001-mayflash-0079-1846-usbhid-fix.patch)
-
----
-
-## Why `hid_mf` alone was not enough
-
-This distinction is important.
-
-Linux already contains Mayflash support for this device family. In fact, upstream Linux previously added support for `0079:1846` and multi-input handling for the four controller ports.
-
-The upstream history is documented here:
-
-- https://lore-kernel.gnuweeb.org/lkml/20201223021813.2791612-16-sashal%40kernel.org/T/
-
-The problem solved here occurs **earlier** in the stack:
+The original USB enumeration succeeded, but generic HID initialization failed:
 
 ```text
 USB device
     │
     ▼
-usbhid initialization       ← failure happened here
+usbhid initialization       ← failure here
+    │
+    X  -71
     │
     ▼
 HID device registration
     │
     ▼
-hid_mf / hid-generic
-    │
-    ▼
 evdev / joystick / SDL2
     │
     ▼
-emulator
+Mupen64Plus
 ```
 
-So this project is not a replacement for Linux's existing Mayflash driver. It is a **device-specific compatibility workaround for the initialization failure**.
+The observed initialization path showed that the adapter firmware did not behave correctly when Linux issued the standard HID `SET_IDLE` request. The resulting USB/HID error prevented the report descriptor from being consumed normally.
+
+The device also exposes a report layout corresponding to four controller ports, while the initial descriptor observed by Linux was only 198 bytes. The compatibility code reconstructs the expected four-port layout and enables continuous polling.
+
+This is why adding another generic controller mapping or merely reloading `hid_mf` was never going to solve the original problem.
 
 ---
 
-## Important: this is NOT a full kernel rebuild
+# What the patch changes
 
-Despite the repository name, users do not have to compile Linux from source.
-
-The included tooling builds a replacement:
+The patch is intentionally small and device-specific. It modifies only:
 
 ```text
-usbhid.ko
+drivers/hid/usbhid/hid-core.c
 ```
 
-against the currently running kernel headers.
+The patch:
 
-Conceptually:
+- skips `hid_set_idle()` for `0079:1846`;
+- expands the known 198-byte report descriptor to 396 bytes;
+- creates report IDs for the additional controller ports;
+- enables `HID_QUIRK_ALWAYS_POLL`;
+- applies the same `SET_IDLE` exception during post-reset recovery.
+
+The actual patch is:
 
 ```text
-Distribution kernel
-       │
-       ├── normal modules
-       │
-       └── patched usbhid.ko  ← this project
+patches/0001-mayflash-0079-1846-usbhid-fix.patch
 ```
 
-The scripts cover:
-
-- preparing the build environment;
-- obtaining the matching `usbhid` sources;
-- applying the patch;
-- compiling the module;
-- backing up the distribution module;
-- installing the patched module;
-- running `depmod`;
-- reloading `usbhid` when possible;
-- updating initramfs;
-- verification;
-- rollback.
+This is **not a replacement for Linux's `hid_mf` driver**. Linux already knows this device family. This repository fixes the earlier initialization failure that prevented the normal HID stack from getting that far. The upstream `0079:1846` support was added specifically for the four-port Mayflash/DragonRise family. citeturn0search0
 
 ---
 
-## Quick start
+# Installation
 
-### Prerequisites
+You do **not** need to rebuild the entire Linux kernel.
 
-Debian/Ubuntu-family systems:
+The repository builds a replacement `usbhid.ko` against the running kernel's headers.
+
+On Debian/Ubuntu-style systems:
 
 ```bash
 sudo apt update
 sudo apt install -y build-essential linux-headers-$(uname -r) patch curl
 ```
 
-### Clone
+Clone the project:
 
 ```bash
 git clone https://github.com/StudioSuiri/Mayflash-Linux-Kernel-Patch.git
 cd Mayflash-Linux-Kernel-Patch
 ```
 
-### Build
+Build:
 
 ```bash
 ./scripts/build-module.sh
 ```
 
-### Install
+Install:
 
 ```bash
 sudo ./scripts/install-module.sh
 ```
 
-### Verify
+Verify:
 
 ```bash
 ./scripts/verify.sh
@@ -319,77 +246,33 @@ For a read-only diagnostic report:
 ./scripts/diagnose.sh
 ```
 
----
+To remove the workaround and restore the stock module:
 
-## Repository tooling
-
-| Tool | Purpose |
-|---|---|
-| `scripts/build-module.sh` | Build patched `usbhid.ko` for the running kernel |
-| `scripts/install-module.sh` | Backup, install, reload and update initramfs |
-| `scripts/uninstall-module.sh` | Roll back to the stock module |
-| `scripts/verify.sh` | Check USB, kernel messages and live input events |
-| `scripts/diagnose.sh` | Collect read-only system/device diagnostics |
-| `patches/*.patch` | The actual kernel source change |
-| `docs/mupen64plus.md` | N64/Mupen64Plus mapping |
-| `docs/troubleshooting.md` | Failure modes and recovery |
-| `tests/test_patch_format.sh` | Patch-format sanity test |
-
----
-
-## What success looks like
-
-At the USB layer:
-
-```text
-0079:1846 DragonRise Inc. GameCube Controller Adapter
+```bash
+sudo ./scripts/uninstall-module.sh
 ```
 
-At the kernel layer, the patched driver reports the workaround being applied, including descriptor expansion and `HID_QUIRK_ALWAYS_POLL`.
+### Important
 
-At the input layer, the adapter can expose independent controller devices for its physical ports.
+The module is tied to the kernel release it was built for. After a kernel update, rebuild it.
 
-**Do not hard-code `/dev/input/eventN` or `/dev/input/jsN`.** Those numbers depend on what other input devices are connected. Prefer `/dev/input/by-id/` or inspect `/proc/bus/input/devices`.
-
----
-
-## The actual N64 setup
-
-The real target was not a GameCube controller. It was a physical N64 controller connected through the adapter:
-
-```text
-Generic N64 controller
-        │
-        ▼
-Adapter port
-        │
-        ▼
-0079:1846 USB HID adapter
-        │
-        ▼
-Linux usbhid
-        │
-        ▼
-evdev / SDL2
-        │
-        ▼
-Mupen64Plus
-        │
-        ▼
-N64 game
+```bash
+uname -r
+./scripts/build-module.sh
+sudo ./scripts/install-module.sh
 ```
 
-The controller used during the successful test was a **generic translucent-green N64 controller** purchased as an inexpensive third-party unit.
-
-Once the adapter successfully entered the Linux HID stack, the N64 controller itself required no special Linux kernel driver.
+The patch is deliberately scoped to `0079:1846`. **Do not modify it to match another VID:PID unless you have evidence that the other hardware has the same failure and descriptor behavior.**
 
 ---
 
-## Verified N64 mapping
+# Mupen64Plus / N64
 
-The adapter presents N64 controls through a GameCube/generic HID-style layout:
+Once the kernel problem is fixed, the N64 controller becomes ordinary Linux input. The emulator mapping is a separate layer.
 
-| N64 control | Signal |
+The verified mapping includes:
+
+| N64 control | Mapping |
 |---|---|
 | Analog X | `axis(0)` |
 | Analog Y | `axis(1)` |
@@ -405,13 +288,7 @@ The adapter presents N64 controls through a GameCube/generic HID-style layout:
 | Start | `button(9)` |
 | D-pad | `hat(0)` |
 
-Full Mupen64Plus configuration is in [`docs/mupen64plus.md`](docs/mupen64plus.md).
-
-### Super Mario 64 camera fix
-
-During the first successful test, the controller worked but the camera felt wrong because the C-stick axes had initially been crossed.
-
-The corrected mapping is:
+The corrected C-button mapping was important for *Super Mario 64*:
 
 ```text
 C-left   → axis(2-)
@@ -420,142 +297,17 @@ C-up     → axis(5-)
 C-down   → axis(5+)
 ```
 
-That restores the expected horizontal camera rotation and C-up/C-down camera behavior in *Super Mario 64*.
-
-This is an **emulator configuration**, not part of the kernel patch.
-
----
-
-## Tested environment
-
-The known successful environment is:
+Full emulator notes live in:
 
 ```text
-Kernel:       6.14.0-37-generic
-Architecture: x86_64
-USB host:     xHCI
-USB device:   0079:1846
-USB mode:     PC HID mode
-Emulator:     Mupen64Plus
-Controller:   generic translucent-green N64 controller
-```
-
-### Kernel updates
-
-The patched module is tied to the kernel version/source it was built against. After a kernel update, rebuild it:
-
-```bash
-./scripts/build-module.sh
-sudo ./scripts/install-module.sh
-```
-
-Do not copy a module built for one kernel release into another kernel's module tree.
-
-Other kernel releases and distributions should be considered **untested until verified**.
-
----
-
-## PC mode matters
-
-This project targets:
-
-```text
-0079:1846
-```
-
-If your adapter exposes another VID:PID in another hardware mode, this patch does not automatically apply.
-
-If your hardware has a mode switch, use the mode that exposes the normal PC HID identity before diagnosing Linux input problems.
-
----
-
-## Troubleshooting
-
-First run the read-only collector:
-
-```bash
-./scripts/diagnose.sh
-```
-
-Then check:
-
-```bash
-lsusb -d 0079:1846
-```
-
-and:
-
-```bash
-dmesg | grep -iE '0079:1846|usbhid|mayflash'
-```
-
-If you still see:
-
-```text
-can't add hid device: -71
-```
-
-check that:
-
-1. the device really is `0079:1846`;
-2. the patched module was built for `uname -r`;
-3. the patched module was actually installed/loaded;
-4. the adapter is in its PC HID mode.
-
-More detailed failure modes are documented in [`docs/troubleshooting.md`](docs/troubleshooting.md).
-
----
-
-## Rollback
-
-To remove the patched module and restore the stock module:
-
-```bash
-sudo ./scripts/uninstall-module.sh
-```
-
-On Debian/Ubuntu systems, the distribution module can also be restored by reinstalling the kernel module package:
-
-```bash
-sudo apt install --reinstall linux-modules-$(uname -r)
+docs/mupen64plus.md
 ```
 
 ---
 
-## Repository layout
+# Verification philosophy
 
-```text
-Mayflash-Linux-Kernel-Patch/
-├── README.md
-├── LICENSE
-├── NOTICE
-│
-├── patches/
-│   └── 0001-mayflash-0079-1846-usbhid-fix.patch
-│
-├── scripts/
-│   ├── build-module.sh
-│   ├── diagnose.sh
-│   ├── install-module.sh
-│   ├── uninstall-module.sh
-│   └── verify.sh
-│
-├── docs/
-│   ├── mupen64plus.md
-│   └── troubleshooting.md
-│
-└── tests/
-    ├── README.md
-    └── test_patch_format.sh
-```
-
-The patch is kept separate from the automation so it can be inspected, reviewed or eventually adapted into a cleaner upstream solution.
-
----
-
-## Verification philosophy
-
-There are three separate things to prove:
+There are three separate milestones:
 
 ### 1. USB sees the device
 
@@ -563,86 +315,121 @@ There are three separate things to prove:
 lsusb -d 0079:1846
 ```
 
-### 2. Linux created controller input devices
+### 2. Linux creates input devices
 
 ```bash
 cat /proc/bus/input/devices
-ls -l /dev/input/
+ls -l /dev/input/by-id/
 ```
 
-### 3. Physical buttons actually generate events
+### 3. Physical controls generate events
 
-Use `scripts/verify.sh`, `evtest`, SDL2 joystick tools or `python-evdev`.
+Use `scripts/verify.sh`, `evtest`, SDL2 tools or `python-evdev`.
 
-Seeing the device in `lsusb` alone is **not success**. The goal of this project is the complete path from USB enumeration to real controller events.
+**`lsusb` alone is not success.** The goal is the complete path from USB enumeration to actual controller events.
 
----
-
-## Upstream context
-
-`0079:1846` is not an unknown device to Linux. Support for the Mayflash/DragonRise family has existed upstream for years, including multi-input handling for the four controller ports.
-
-The upstream history is useful background:
-
-- https://lore-kernel.gnuweeb.org/lkml/20201223021813.2791612-16-sashal%40kernel.org/T/
-
-This project addresses a different failure mode: a particular device/firmware behavior that prevents the generic HID initialization sequence from completing on the tested modern xHCI/Linux stack.
+Also, do not hard-code `/dev/input/eventN` or `/dev/input/jsN`; those numbers are dynamic.
 
 ---
 
-## Known limitations and honest scope
+# Repository layout
 
-- Tested target: `0079:1846`.
-- This does **not** claim to support every N64-to-USB adapter.
-- Similar-looking hardware can have different firmware and VID:PID values.
-- The patch deliberately scopes behavior to one exact VID:PID.
-- Kernel updates can require a rebuild/reinstall of the module.
-- The build tooling currently assumes a Debian/Ubuntu-style kernel build tree.
-- `/dev/input/eventN` and `/dev/input/jsN` numbers are dynamic.
-- N64 button numbering may differ on other firmware revisions.
-- The successful hardware identification is based on USB descriptors, not a claim that the physical enclosure is an official Mayflash product.
-
-If your hardware differs, run:
-
-```bash
-./scripts/diagnose.sh
+```text
+Mayflash-Linux-Kernel-Patch/
+├── README.md
+├── LICENSE
+├── NOTICE
+├── patches/
+│   └── 0001-mayflash-0079-1846-usbhid-fix.patch
+├── scripts/
+│   ├── build-module.sh
+│   ├── diagnose.sh
+│   ├── install-module.sh
+│   ├── uninstall-module.sh
+│   └── verify.sh
+├── docs/
+│   ├── mupen64plus.md
+│   ├── troubleshooting.md
+│   └── images/
+│       └── hs-n6420-real.jpg
+└── tests/
+    ├── README.md
+    └── test_patch_format.sh
 ```
 
-and include its output in an issue.
+---
+
+# Scope and limitations
+
+This repository makes deliberately modest claims.
+
+- Tested USB identity: **`0079:1846`**.
+- Tested Linux kernel: **`6.14.0-37-generic`**.
+- Tested host: x86_64 Linux with xHCI.
+- Tested emulator: Mupen64Plus.
+- Tested controller: generic translucent-green N64 controller.
+- The physical adapter was sold as **N64 Controller Converter, HS-N6420**.
+- The USB descriptors reported `mayflash limited` / `GameCube Controller Adapter`.
+- We do **not** claim that every HS-N6420, every clone, or every visually similar adapter is identical.
+- Other kernel releases and distributions require verification.
+- The out-of-tree build tooling currently targets Debian/Ubuntu-style kernel trees.
+
+The project is intentionally conservative because a device-specific HID quirk should be based on observed USB behavior, not on a product photo or marketplace name.
 
 ---
 
-## Contributing
+# Why publish this?
+
+Because the problem is reproducible, the workaround is narrow, the code is reviewable, and the repository includes the actual kernel patch rather than only a mysterious binary.
+
+There is also useful upstream context: Linux already gained explicit `0079:1846` support years ago because this family needed special multi-input handling. citeturn0search0turn0search4
+
+What we have here is a different layer of compatibility failure discovered on a modern system with this hardware. Publishing the exact VID:PID, failure log, descriptor behavior, patch and verification path gives other Linux users something concrete to test — and gives kernel developers enough information to decide whether the workaround belongs upstream, needs refinement, or only applies to a particular firmware revision.
+
+If somebody has the same `0079:1846` device and **does not** need this patch on a different kernel, that is valuable information too.
+
+---
+
+# Contributing
 
 Useful contributions include:
 
-- testing additional kernel releases;
-- testing additional `0079:1846` hardware revisions;
-- capturing HID descriptors from affected units;
-- testing Intel, AMD and other xHCI hosts;
-- improving the out-of-tree build/install flow;
+- testing additional kernel versions;
+- testing additional `0079:1846` revisions;
+- comparing HID descriptors from working and failing units;
+- testing Intel and AMD xHCI hosts;
+- validating the workaround on other distributions;
+- improving the module build/install flow;
 - finding a cleaner upstreamable solution;
-- documenting mappings for additional emulators.
+- documenting mappings for other emulators.
 
-When reporting a problem, include the VID:PID, kernel version, distribution, relevant `dmesg` output and `scripts/diagnose.sh` output.
+When opening an issue, include:
+
+```text
+uname -r
+lsusb -d 0079:1846
+./scripts/diagnose.sh
+```
+
+and the relevant `dmesg` output.
 
 ---
 
-## The story in one sentence
+# The one-line version
 
-A cheap generic N64 adapter that Linux stubbornly recognized as `0079:1846` but refused to turn into a controller became a working N64 input device after a tiny, device-specific `usbhid` compatibility patch — and this repository exists so the next person does not have to spend an evening rediscovering why.
+> **A cheap Chinese N64 controller converter that Linux stubbornly identified as `0079:1846` but refused to turn into a controller became fully usable after a tiny, device-specific `usbhid` compatibility patch — so we wrote down exactly how and why.**
 
 ---
 
-## Credits
+## Credits and disclaimer
 
 This is an independent community project born from real hardware debugging and verification.
 
-It is **not affiliated with Mayflash, DragonRise, Nintendo, Linux kernel maintainers or Mupen64Plus**.
+It is **not affiliated with Mayflash, DragonRise, HONSON, Nintendo, Linux kernel maintainers or Mupen64Plus**.
 
-If this saves you an evening of kernel archaeology, mission accomplished.
+The HS-N6420 model identification comes from the packaging supplied with the tested hardware; the Linux-side identification comes from the USB descriptors actually observed on that hardware.
 
----
+The kernel patch is provided for testing and compatibility purposes. Review it before installing it on a production system, keep a rollback path, and rebuild it when your kernel changes.
 
 ## License
 
