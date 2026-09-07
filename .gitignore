@@ -1,0 +1,19 @@
+# Build artifacts
+build/
+*.o
+*.ko
+*.mod
+*.mod.c
+*.order
+*.symvers
+*.cmd
+.tmp_versions/
+.cache/
+
+# System / Editor files
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db

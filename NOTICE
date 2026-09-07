@@ -1,0 +1,13 @@
+# Notices & Attributions
+
+## Linux Kernel Code & Patches
+
+The patch files provided in this repository under `patches/` modify the Linux kernel driver `drivers/hid/usbhid/hid-core.c`.
+
+- The Linux kernel source code is copyrighted by Linus Torvalds and other contributors.
+- Linux is licensed under the terms of the **GNU General Public License version 2 (GPL-2.0-only)** as published by the Free Software Foundation.
+- The modifications in `patches/` are intended for submission or application to the Linux kernel and are distributed under the terms of the **GNU General Public License version 2 (GPL-2.0-only)**.
+
+## Project Scripts and Documentation
+
+The scripts (`scripts/`), documentation (`docs/`), and test harnesses (`tests/`) in this repository are original works of StudioSuiri and are released under the terms of the permissive **MIT License** (see `LICENSE`).
