@@ -1,4 +1,4 @@
-# Mayflash / DragonRise `0079:1846` Linux HID Fix
+# HS-N6420 / `0079:1846` Linux HID Fix
 
 > **A tiny, targeted Linux `usbhid` workaround that turns a stubborn N64 controller converter into real Linux input.**
 
@@ -63,8 +63,7 @@ The safest identification rule is therefore:
 
 > **Do not identify the hardware by its plastic shell. Identify it by VID:PID and USB descriptors.**
 
-The HS-N6420 model is commercially sold as an N64 Controller Converter supporting N64 controllers on PC/Switch.
-
+The HS-N6420 model is the identification printed on the packaging of the tested unit. The Linux-side identity comes from the USB descriptors actually reported by that unit.
 
 ---
 
@@ -90,9 +89,7 @@ The HS-N6420 model is commercially sold as an N64 Controller Converter supportin
 | Controller tested | Physical N64 controller (translucent green) |
 | Functional result | Native input recognized, all buttons, stick, and corrected C-button camera controls verified |
 
-The public Linux history confirms that `0079:1846` is a known Mayflash/DragonRise GameCube-adapter ID and that Linux already has multi-input support for its four controller ports.
-
-That was an important clue: **the problem was not simply “Linux has no driver for this thing.”**
+The important point is that **HS-N6420 is a physical/product identifier, not a claim that the USB device is uniquely manufactured by Mayflash**. The tested hardware reports the Mayflash/DragonRise USB identity `0079:1846`.
 
 ---
 
@@ -202,7 +199,7 @@ The actual patch is:
 patches/0001-mayflash-0079-1846-usbhid-fix.patch
 ```
 
-This is **not a replacement for Linux's `hid_mf` driver**. Linux already knows this device family. This repository fixes the earlier initialization failure that prevented the normal HID stack from getting that far. The upstream `0079:1846` support was added specifically for the four-port Mayflash/DragonRise family.
+This is **not a replacement for Linux's `hid_mf` driver**. Linux already knows this device family. This repository fixes the earlier initialization failure that prevented the normal HID stack from getting that far.
 
 ---
 
@@ -222,9 +219,11 @@ sudo apt install -y build-essential linux-headers-$(uname -r) patch curl
 Clone the project:
 
 ```bash
-git clone https://github.com/StudioSuiri/Mayflash-Linux-Kernel-Patch.git
-cd Mayflash-Linux-Kernel-Patch
+git clone https://github.com/StudioSuiri/HS-N6420-0079-1846-Linux-HID-Patch.git
+cd HS-N6420-0079-1846-Linux-HID-Patch
 ```
+
+> GitHub redirects old repository URLs after a rename, so the original repository URL may continue to work for existing clones.
 
 Build:
 
@@ -274,24 +273,6 @@ The patch is deliberately scoped to `0079:1846`. **Do not modify it to match ano
 
 Once the kernel problem is fixed, the N64 controller becomes ordinary Linux input. The emulator mapping is a separate layer.
 
-The verified mapping includes:
-
-| N64 control | Mapping |
-|---|---|
-| Analog X | `axis(0)` |
-| Analog Y | `axis(1)` |
-| C-left | `axis(2-)` |
-| C-right | `axis(2+)` |
-| C-up | `axis(5-)` |
-| C-down | `axis(5+)` |
-| A | `button(1)` |
-| B | `button(2)` |
-| L | `button(4)` |
-| R | `button(5)` |
-| Z | `button(7)` |
-| Start | `button(9)` |
-| D-pad | `hat(0)` |
-
 The corrected C-button mapping was important for *Super Mario 64*:
 
 ```text
@@ -339,7 +320,7 @@ Also, do not hard-code `/dev/input/eventN` or `/dev/input/jsN`; those numbers ar
 # Repository layout
 
 ```text
-Mayflash-Linux-Kernel-Patch/
+HS-N6420-0079-1846-Linux-HID-Patch/
 ├── README.md
 ├── LICENSE
 ├── NOTICE
@@ -355,7 +336,7 @@ Mayflash-Linux-Kernel-Patch/
 │   ├── mupen64plus.md
 │   ├── troubleshooting.md
 │   └── images/
-│       └── hs-n6420-real.jpg
+│       └── hs-n6420-real.webp
 └── tests/
     ├── README.md
     └── test_patch_format.sh
@@ -382,13 +363,30 @@ The project is intentionally conservative because a device-specific HID quirk sh
 
 ---
 
+# Upstream status
+
+This repository is **not an upstream Linux kernel submission** and does not claim to be one.
+
+The goal of publishing it is to make the failure reproducible and the workaround reviewable. If other users confirm the same behavior, or if a kernel developer determines that the quirk is appropriate for Linux, the patch can be refined and submitted through the normal Linux HID/kernel development process.
+
+In particular, upstream review may determine that the current workaround is too broad, too specific to one firmware revision, or should be implemented differently. That is a feature of publishing the evidence rather than hiding the workaround in a private machine.
+
+Useful evidence for future review includes:
+
+- the exact `0079:1846` USB identity;
+- the failing `usbhid` `-71` trace;
+- the observed HID/report descriptors;
+- the minimal device-specific patch;
+- successful input-event verification;
+- kernel versions on which the problem is reproduced or absent.
+
+---
+
 # Why publish this?
 
 Because the problem is reproducible, the workaround is narrow, the code is reviewable, and the repository includes the actual kernel patch rather than only a mysterious binary.
 
-There is also useful upstream context: Linux already gained explicit `0079:1846` support years ago because this family needed special multi-input handling.
-
-What we have here is a different layer of compatibility failure discovered on a modern system with this hardware. Publishing the exact VID:PID, failure log, descriptor behavior, patch and verification path gives other Linux users something concrete to test — and gives kernel developers enough information to decide whether the workaround belongs upstream, needs refinement, or only applies to a particular firmware revision.
+Publishing the exact VID:PID, failure log, descriptor behavior, patch and verification path gives other Linux users something concrete to test — and gives kernel developers enough information to decide whether the workaround belongs upstream, needs refinement, or only applies to a particular firmware revision.
 
 If somebody has the same `0079:1846` device and **does not** need this patch on a different kernel, that is valuable information too.
 
@@ -421,7 +419,7 @@ and the relevant `dmesg` output.
 
 # The one-line version
 
-> **A cheap Chinese N64 controller converter that Linux stubbornly identified as `0079:1846` but refused to turn into a controller became fully usable after a tiny, device-specific `usbhid` compatibility patch — so we wrote down exactly how and why.**
+> **A cheap Chinese N64 controller converter sold as HS-N6420 that Linux identified as `0079:1846` but refused to turn into a controller became fully usable after a tiny, device-specific `usbhid` compatibility patch — so we wrote down exactly how and why.**
 
 ---
 
