@@ -19,27 +19,34 @@ fi
 
 RESTORED=0
 
+# Restore uncompressed .orig
 if [ -f "${TARGET_DIR}/usbhid.ko.orig" ]; then
-    echo "[-] Restoring ${TARGET_DIR}/usbhid.ko from .orig..."
-    cp "${TARGET_DIR}/usbhid.ko.orig" "${TARGET_DIR}/usbhid.ko"
+    echo "[-] Restoring ${TARGET_DIR}/usbhid.ko from usbhid.ko.orig..."
+    cp -a "${TARGET_DIR}/usbhid.ko.orig" "${TARGET_DIR}/usbhid.ko"
+    # If the system uses zstd, compress the restored module
+    if [ -f "${TARGET_DIR}/usbhid.ko.zst" ] || command -v zstd >/dev/null 2>&1; then
+        zstd -f -19 "${TARGET_DIR}/usbhid.ko" -o "${TARGET_DIR}/usbhid.ko.zst"
+    fi
     RESTORED=1
 fi
 
+# Restore .zst.orig
 if [ -f "${TARGET_DIR}/usbhid.ko.zst.orig" ]; then
-    echo "[-] Restoring ${TARGET_DIR}/usbhid.ko.zst from .orig..."
-    cp "${TARGET_DIR}/usbhid.ko.zst.orig" "${TARGET_DIR}/usbhid.ko.zst"
+    echo "[-] Restoring ${TARGET_DIR}/usbhid.ko.zst from usbhid.ko.zst.orig..."
+    cp -a "${TARGET_DIR}/usbhid.ko.zst.orig" "${TARGET_DIR}/usbhid.ko.zst"
     RESTORED=1
 fi
 
+# Restore .xz.orig
 if [ -f "${TARGET_DIR}/usbhid.ko.xz.orig" ]; then
-    echo "[-] Restoring ${TARGET_DIR}/usbhid.ko.xz from .orig..."
-    cp "${TARGET_DIR}/usbhid.ko.xz.orig" "${TARGET_DIR}/usbhid.ko.xz"
+    echo "[-] Restoring ${TARGET_DIR}/usbhid.ko.xz from usbhid.ko.xz.orig..."
+    cp -a "${TARGET_DIR}/usbhid.ko.xz.orig" "${TARGET_DIR}/usbhid.ko.xz"
     RESTORED=1
 fi
 
 if [ "$RESTORED" -eq 0 ]; then
     echo "ERROR: No backup (.orig) files found in ${TARGET_DIR}/."
-    echo "To restore the stock module, reinstall your kernel package, for example:"
+    echo "To restore the stock module from the package manager, reinstall:"
     echo "  sudo apt install --reinstall linux-modules-${KVER}"
     exit 1
 fi
@@ -59,6 +66,14 @@ rmmod usbhid 2>/dev/null || true
 sleep 0.5
 modprobe usbhid
 sleep 0.5
+
+# Rebind USB HID devices
+for dev in /sys/bus/usb/devices/*; do
+    if [ -f "$dev/bInterfaceClass" ] && [ "$(cat "$dev/bInterfaceClass" 2>/dev/null)" = "03" ]; then
+        base="$(basename "$dev")"
+        echo "$base" > /sys/bus/usb/drivers/usbhid/bind 2>/dev/null || true
+    fi
+done
 
 echo "[-] Updating initramfs..."
 if command -v update-initramfs >/dev/null 2>&1; then

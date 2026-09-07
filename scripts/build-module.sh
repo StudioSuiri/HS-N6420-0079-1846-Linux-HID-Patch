@@ -9,6 +9,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
 PATCH_FILE="${REPO_ROOT}/patches/0001-mayflash-0079-1846-usbhid-fix.patch"
 BUILD_DIR="${REPO_ROOT}/build"
+SRC_DIR="${REPO_ROOT}/src"
 KVER="$(uname -r)"
 KSRC="/lib/modules/${KVER}/build"
 
@@ -24,7 +25,7 @@ if [ ! -d "${KSRC}" ]; then
     exit 1
 fi
 
-for tool in gcc make patch curl; do
+for tool in gcc make patch; do
     if ! command -v "${tool}" >/dev/null 2>&1; then
         echo "ERROR: Required build tool '${tool}' is not installed."
         echo "Please install build-essential and patch: sudo apt install build-essential patch"
@@ -32,47 +33,19 @@ for tool in gcc make patch curl; do
     fi
 done
 
-# 2. Setup build directory
+# 2. Setup clean build directory from local repository src/
+echo "[-] Setting up build environment in ${BUILD_DIR}..."
+rm -rf "${BUILD_DIR}"
 mkdir -p "${BUILD_DIR}"
+
+cp -a "${SRC_DIR}"/* "${BUILD_DIR}/"
 cd "${BUILD_DIR}"
 
-# 3. Retrieve drivers/hid/usbhid source files matching current kernel
-echo "[-] Preparing usbhid source files..."
-BASE_URL="https://raw.githubusercontent.com/torvalds/linux/v$(echo "${KVER}" | cut -d'-' -f1)/drivers/hid/usbhid"
-
-# Fallback to kernel headers or curl if git is not cloned
-for f in hid-core.c hiddev.c hid-pidff.c hid-pidff.h usbhid.h; do
-    if [ ! -f "${f}" ]; then
-        echo "    Fetching ${f}..."
-        if ! curl -sSL --fail "${BASE_URL}/${f}" -o "${f}"; then
-            echo "    Fallback: Fetching from stable kernel tree..."
-            curl -sSL --fail "https://git.kernel.org/pub/scm/linux/kernel/git/stable/linux.git/plain/drivers/hid/usbhid/${f}?h=v$(echo "${KVER}" | cut -d'.' -f1,2)" -o "${f}"
-        fi
-    fi
-done
-
-# 4. Create out-of-tree Makefile
-cat << 'EOF' > Makefile
-KDIR ?= /lib/modules/$(shell uname -r)/build
-PWD := $(shell pwd)
-
-obj-m += usbhid.o
-usbhid-y := hid-core.o hiddev.o hid-pidff.o
-
-default:
-	$(MAKE) -C $(KDIR) M=$(PWD) modules
-
-clean:
-	$(MAKE) -C $(KDIR) M=$(PWD) clean
-EOF
-
-# 5. Apply the patch
-echo "[-] Applying patch 0001-mayflash-0079-1846-usbhid-fix.patch..."
-# Reset hid-core.c if already patched
-git checkout hid-core.c 2>/dev/null || true
-if patch -p3 -N --dry-run < "${PATCH_FILE}" >/dev/null 2>&1; then
-    patch -p3 < "${PATCH_FILE}"
-    echo "    Patch applied successfully."
+# 3. Apply the patch
+echo "[-] Applying patch $(basename "${PATCH_FILE}")..."
+if patch -p4 -N --dry-run < "${PATCH_FILE}" >/dev/null 2>&1; then
+    patch -p4 < "${PATCH_FILE}"
+    echo "    Patch applied cleanly."
 else
     if grep -q "0079:1846" hid-core.c; then
         echo "    Notice: hid-core.c already contains the 0079:1846 fix."
@@ -82,8 +55,8 @@ else
     fi
 fi
 
-# 6. Build the module
-echo "[-] Compiling module..."
+# 4. Build the module
+echo "[-] Compiling module against ${KSRC}..."
 make -C "${KSRC}" M="${BUILD_DIR}" clean
 make -C "${KSRC}" M="${BUILD_DIR}" modules
 
@@ -91,7 +64,9 @@ if [ -f "${BUILD_DIR}/usbhid.ko" ]; then
     echo
     echo "========================================================"
     echo " SUCCESS: Module built at ${BUILD_DIR}/usbhid.ko"
-    echo " Run './scripts/install-module.sh' to install it."
+    echo " Vermagic: $(modinfo -F vermagic "${BUILD_DIR}/usbhid.ko")"
+    echo
+    echo " Run 'sudo ./scripts/install-module.sh' to install it."
     echo "========================================================"
 else
     echo "ERROR: Compilation failed, usbhid.ko was not created."

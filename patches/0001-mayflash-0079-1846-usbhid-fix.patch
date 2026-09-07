@@ -1,30 +1,5 @@
-From 0000000000000000000000000000000000000000 Mon Sep 17 00:00:00 2001
-From: StudioSuiri <studiosuiri@users.noreply.github.com>
-Date: Mon, 7 Sep 2026 16:15:00 -0500
-Subject: [PATCH] HID: usbhid: fix Mayflash GameCube adapter 0079:1846 probe error -71
-
-The Mayflash / DragonRise 4-port GameCube Controller Adapter (VID:PID 0079:1846)
-stalls upon receiving a USB HID class SET_IDLE request during usbhid_parse()
-and post_reset(). On modern xHCI hosts, this stall results in EPROTO (-71)
-when attempting to read the report descriptor, preventing any input device
-from being registered.
-
-Furthermore, the firmware supplies a report descriptor of 198 bytes that
-only defines Report IDs 1 and 2, even though the device continuously outputs
-data for all 4 physical ports (Report IDs 1, 2, 3, and 4) on interrupt endpoint
-0x81. Without HID_QUIRK_ALWAYS_POLL, polling can be suspended when no key
-is considered held down.
-
-Fix this by:
-1. Skipping hid_set_idle() for 0079:1846 in both parse and post-reset paths.
-2. Expanding the 198-byte descriptor to 396 bytes to register all 4 controller ports.
-3. Enabling HID_QUIRK_ALWAYS_POLL for 0079:1846 to maintain continuous packet delivery.
-
-Signed-off-by: StudioSuiri <studiosuiri@users.noreply.github.com>
----
- drivers/hid/usbhid/hid-core.c | 31 +++++++++++++++++++++++++++++--
- 1 file changed, 29 insertions(+), 2 deletions(-)
-
+diff --git a/drivers/hid/usbhid/hid-core.c b/drivers/hid/usbhid/hid-core.c
+index e8428ac..23d91b1 100644
 --- a/drivers/hid/usbhid/hid-core.c
 +++ b/drivers/hid/usbhid/hid-core.c
 @@ -1049,7 +1049,10 @@ static int usbhid_parse(struct hid_device *hid)
@@ -59,10 +34,9 @@ Signed-off-by: StudioSuiri <studiosuiri@users.noreply.github.com>
 +			rsize = 396;
 +			dev_info(&dev->dev, "usbhid: expanded 0079:1846 descriptor to 4 ports (396 bytes)\n");
 +		}
-+	}
+ 	}
  	ret = hid_parse_report(hid, rdesc, rsize);
  	kfree(rdesc);
- 	if (ret) {
 @@ -1072,6 +1091,12 @@ static int usbhid_parse(struct hid_device *hid)
  			"%u unsupported optional hid class descriptors\n",
  			(int)(hdesc->bNumDescriptors - 1));
@@ -76,7 +50,7 @@ Signed-off-by: StudioSuiri <studiosuiri@users.noreply.github.com>
  	hid->quirks |= quirks;
  
  	return 0;
-@@ -1578,7 +1603,8 @@ static int usbhid_post_reset(struct usb_interface *intf)
+@@ -1578,7 +1603,8 @@ static int hid_post_reset(struct usb_interface *intf)
  	clear_bit(HID_RESET_PENDING, &usbhid->iofl);
  	clear_bit(HID_CLEAR_HALT, &usbhid->iofl);
  	spin_unlock_irq(&usbhid->lock);
@@ -86,4 +60,3 @@ Signed-off-by: StudioSuiri <studiosuiri@users.noreply.github.com>
  
  	hid_restart_io(hid);
  
--- 
