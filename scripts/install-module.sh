@@ -52,7 +52,17 @@ if [ ! -f "${BUILD_DIR}/usbhid.ko" ]; then
     exit 1
 fi
 
-# 1. Back up original module if not already backed up
+# 1. Detect installed module format in target directory
+DETECTED_EXT=""
+if [ -f "${TARGET_DIR}/usbhid.ko.zst" ] || [ -f "${TARGET_DIR}/usbhid.ko.zst.orig" ]; then
+    DETECTED_EXT=".zst"
+elif [ -f "${TARGET_DIR}/usbhid.ko.xz" ] || [ -f "${TARGET_DIR}/usbhid.ko.xz.orig" ]; then
+    DETECTED_EXT=".xz"
+elif [ -f "${TARGET_DIR}/usbhid.ko" ] || [ -f "${TARGET_DIR}/usbhid.ko.orig" ]; then
+    DETECTED_EXT=""
+fi
+
+# 2. Back up original stock module if not already preserved
 if [ ! -f "${TARGET_DIR}/usbhid.ko.orig" ] && [ ! -f "${TARGET_DIR}/usbhid.ko.zst.orig" ] && [ ! -f "${TARGET_DIR}/usbhid.ko.xz.orig" ]; then
     echo "[-] Creating backup of original stock module..."
     if [ -f "${TARGET_DIR}/usbhid.ko.zst" ]; then
@@ -64,52 +74,69 @@ if [ ! -f "${TARGET_DIR}/usbhid.ko.orig" ] && [ ! -f "${TARGET_DIR}/usbhid.ko.zs
     elif [ -f "${TARGET_DIR}/usbhid.ko" ]; then
         cp -a "${TARGET_DIR}/usbhid.ko" "${TARGET_DIR}/usbhid.ko.orig"
         echo "    Backup saved to ${TARGET_DIR}/usbhid.ko.orig"
+    else
+        echo "WARNING: No existing stock usbhid module found in ${TARGET_DIR}/ to back up."
     fi
 else
     echo "[-] Stock backup already safely preserved in ${TARGET_DIR}/ (skipping overwrite of backup)."
 fi
 
-# 2. Install patched module
-echo "[-] Installing patched usbhid.ko..."
-cp "${BUILD_DIR}/usbhid.ko" "${TARGET_DIR}/usbhid.ko"
+# 3. Clean up existing target module variants to prevent inconsistent states
+echo "[-] Preparing target directory (avoiding conflicting .ko/.zst/.xz variants)..."
+rm -f "${TARGET_DIR}/usbhid.ko" "${TARGET_DIR}/usbhid.ko.zst" "${TARGET_DIR}/usbhid.ko.xz"
 
-# Compress if the distribution uses compressed modules (.zst or .xz)
-if [ -f "${TARGET_DIR}/usbhid.ko.zst" ] || [ -f "${TARGET_DIR}/usbhid.ko.zst.orig" ] || command -v zstd >/dev/null 2>&1; then
+# 4. Install and compress appropriately matching detected format
+echo "[-] Installing patched module..."
+if [ "$DETECTED_EXT" = ".zst" ] || ([ -z "$DETECTED_EXT" ] && command -v zstd >/dev/null 2>&1); then
     echo "    Compressing with zstd..."
-    zstd -f -19 "${TARGET_DIR}/usbhid.ko" -o "${TARGET_DIR}/usbhid.ko.zst"
-fi
-
-if [ -f "${TARGET_DIR}/usbhid.ko.xz" ] || [ -f "${TARGET_DIR}/usbhid.ko.xz.orig" ]; then
+    zstd -f -19 "${BUILD_DIR}/usbhid.ko" -o "${TARGET_DIR}/usbhid.ko.zst"
+elif [ "$DETECTED_EXT" = ".xz" ]; then
     echo "    Compressing with xz..."
-    xz -f -k "${TARGET_DIR}/usbhid.ko"
+    xz -c -k "${BUILD_DIR}/usbhid.ko" > "${TARGET_DIR}/usbhid.ko.xz"
+else
+    cp "${BUILD_DIR}/usbhid.ko" "${TARGET_DIR}/usbhid.ko"
 fi
 
-# 3. Update module dependencies
+# 5. Update module dependencies
 echo "[-] Updating module dependencies (depmod)..."
 depmod -a
 
-# 4. Safely reload usbhid in memory
-echo "[-] Reloading usbhid module..."
-# Safely unbind all active HID devices to avoid kernel lockups
-for dev in /sys/bus/usb/drivers/usbhid/*:*; do
-    if [ -e "$dev" ]; then
-        base="$(basename "$dev")"
-        echo "$base" > /sys/bus/usb/drivers/usbhid/unbind 2>/dev/null || true
-    fi
-done
-sleep 0.5
-rmmod usbhid 2>/dev/null || true
-sleep 0.5
-modprobe usbhid
-sleep 0.5
+# 6. Safe module reload in memory (non-disruptive)
+echo "[-] Attempting safe reload of usbhid in memory..."
+# Check if any USB keyboard or critical device is actively bound
+RELOAD_SUCCESS=0
+if lsmod | grep -q "^usbhid"; then
+    # Unbind known HID devices safely before rmmod
+    for dev in /sys/bus/usb/drivers/usbhid/*:*; do
+        if [ -e "$dev" ]; then
+            base="$(basename "$dev")"
+            echo "$base" > /sys/bus/usb/drivers/usbhid/unbind 2>/dev/null || true
+        fi
+    done
+    sleep 0.5
 
-# Rebind USB HID devices
-for dev in /sys/bus/usb/devices/*; do
-    if [ -f "$dev/bInterfaceClass" ] && [ "$(cat "$dev/bInterfaceClass" 2>/dev/null)" = "03" ]; then
-        base="$(basename "$dev")"
-        echo "$base" > /sys/bus/usb/drivers/usbhid/bind 2>/dev/null || true
+    if rmmod usbhid 2>/dev/null; then
+        sleep 0.5
+        if modprobe usbhid; then
+            RELOAD_SUCCESS=1
+            echo "    [OK] Module successfully reloaded in memory."
+        fi
+    else
+        echo "    [NOTE] usbhid module is currently held in use by system devices."
+        echo "    Skipping forced in-memory unload to protect active USB input devices."
+        echo "    A system reboot is recommended to activate the new module."
     fi
-done
+
+    # Rebind USB HID devices
+    for dev in /sys/bus/usb/devices/*; do
+        if [ -f "$dev/bInterfaceClass" ] && [ "$(cat "$dev/bInterfaceClass" 2>/dev/null)" = "03" ]; then
+            base="$(basename "$dev")"
+            echo "$base" > /sys/bus/usb/drivers/usbhid/bind 2>/dev/null || true
+        fi
+    done
+else
+    modprobe usbhid || true
+fi
 
 # 5. Update initramfs for reboot persistence
 echo "[-] Updating initramfs for persistence across reboots..."

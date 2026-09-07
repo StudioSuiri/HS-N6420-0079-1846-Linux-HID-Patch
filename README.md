@@ -324,8 +324,17 @@ HS-N6420-0079-1846-Linux-HID-Patch/
 ├── README.md
 ├── LICENSE
 ├── NOTICE
+├── SECURITY.md
+├── CONTRIBUTING.md
 ├── patches/
 │   └── 0001-mayflash-0079-1846-usbhid-fix.patch
+├── src/
+│   ├── Makefile
+│   ├── hid-core.c
+│   ├── hiddev.c
+│   ├── hid-pidff.c
+│   ├── hid-pidff.h
+│   └── usbhid.h
 ├── scripts/
 │   ├── build-module.sh
 │   ├── diagnose.sh
@@ -338,9 +347,14 @@ HS-N6420-0079-1846-Linux-HID-Patch/
 │   └── images/
 │       └── hs-n6420-real.webp
 └── tests/
-    ├── README.md
     └── test_patch_format.sh
 ```
+
+---
+
+## Upstream status
+
+This repository is an independent, experimentally verified workaround. It is not an official Linux kernel patch and has not been accepted upstream. The long-term goal is to provide enough reproducible evidence for a future upstream HID fix if kernel maintainers consider the behavior appropriate.
 
 ---
 
@@ -352,12 +366,13 @@ This repository makes deliberately modest claims.
 - Tested Linux kernel: **`6.14.0-37-generic`**.
 - Tested host: x86_64 Linux with xHCI.
 - Tested emulator: Mupen64Plus.
-- Tested controller: generic translucent-green N64 controller.
-- The physical adapter was sold as **N64 Controller Converter, HS-N6420**.
+- Tested controller: physical translucent-green N64 controller.
+- The physical adapter was sold as **N64 Controller Converter, Model: HS-N6420**.
 - The USB descriptors reported `mayflash limited` / `GameCube Controller Adapter`.
 - We do **not** claim that every HS-N6420, every clone, or every visually similar adapter is identical.
 - Other kernel releases and distributions require verification.
-- The out-of-tree build tooling currently targets Debian/Ubuntu-style kernel trees.
+- Build dependencies: The out-of-tree module compilation (`build-module.sh`) operates entirely offline against the bundled stock driver sources in `src/` and the local kernel development headers (`linux-headers-$(uname -r)`). No remote scripts, external binaries, or third-party code are downloaded at build time.
+
 
 The project is intentionally conservative because a device-specific HID quirk should be based on observed USB behavior, not on a product photo or marketplace name.
 
