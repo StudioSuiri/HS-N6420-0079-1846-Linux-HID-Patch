@@ -42,7 +42,7 @@ We traced the failure into Linux's generic HID initialization path and built a d
 
 This is the actual adapter used for the investigation — **not a stock Mayflash product photo**:
 
-![Actual HS-N6420 N64 controller converter](docs/images/hs-n6420-real.jpg)
+![Actual HS-N6420 N64 controller converter](docs/images/hs-n6420-real.webp)
 
 The box identifies the unit as:
 
@@ -63,30 +63,34 @@ The safest identification rule is therefore:
 
 > **Do not identify the hardware by its plastic shell. Identify it by VID:PID and USB descriptors.**
 
-The HS-N6420 model information is also independently listed by its manufacturer/distributor as an N64 Controller Converter supporting N64 controllers on PC/Switch. citeturn0search13
+The HS-N6420 model is commercially sold as an N64 Controller Converter supporting N64 controllers on PC/Switch.
+
 
 ---
 
 ## What we actually observed
 
-| Property | Observed value |
+| Property | Observed / Tested value |
 |---|---|
-| USB VID | `0079` |
-| USB PID | `1846` |
-| USB database identity | DragonRise Inc. |
+| USB VID:PID | `0079:1846` |
+| USB database identity | DragonRise Inc. GameCube Controller Adapter |
 | USB manufacturer string | `mayflash limited` |
 | USB product string | `GameCube Controller Adapter` |
+| Physical packaging | "N64 Controller Converter", Model: `HS-N6420` |
 | USB version | 2.00 |
 | HID version | 1.10 |
 | Interface | HID class (`03`) |
 | Interrupt IN endpoint | `0x81` / 37 bytes |
 | OUT endpoint | `0x02` / 5 bytes |
 | Report descriptor | 198 bytes before workaround |
-| Successful kernel | `6.14.0-37-generic` |
-| Emulator | Mupen64Plus |
-| Controller | Generic translucent-green N64 controller |
+| Kernel driver involved | `usbhid` (patched) + `hid_mf` |
+| Successful Linux kernel | `6.14.0-37-generic` |
+| Emulator tested | Mupen64Plus |
+| Test ROM | *Super Mario 64* (USA) |
+| Controller tested | Physical N64 controller (translucent green) |
+| Functional result | Native input recognized, all buttons, stick, and corrected C-button camera controls verified |
 
-The public Linux history confirms that `0079:1846` is a known Mayflash/DragonRise GameCube-adapter ID and that Linux already has multi-input support for its four controller ports. citeturn0search0turn0search3
+The public Linux history confirms that `0079:1846` is a known Mayflash/DragonRise GameCube-adapter ID and that Linux already has multi-input support for its four controller ports.
 
 That was an important clue: **the problem was not simply “Linux has no driver for this thing.”**
 
@@ -198,7 +202,7 @@ The actual patch is:
 patches/0001-mayflash-0079-1846-usbhid-fix.patch
 ```
 
-This is **not a replacement for Linux's `hid_mf` driver**. Linux already knows this device family. This repository fixes the earlier initialization failure that prevented the normal HID stack from getting that far. The upstream `0079:1846` support was added specifically for the four-port Mayflash/DragonRise family. citeturn0search0
+This is **not a replacement for Linux's `hid_mf` driver**. Linux already knows this device family. This repository fixes the earlier initialization failure that prevented the normal HID stack from getting that far. The upstream `0079:1846` support was added specifically for the four-port Mayflash/DragonRise family.
 
 ---
 
@@ -382,7 +386,7 @@ The project is intentionally conservative because a device-specific HID quirk sh
 
 Because the problem is reproducible, the workaround is narrow, the code is reviewable, and the repository includes the actual kernel patch rather than only a mysterious binary.
 
-There is also useful upstream context: Linux already gained explicit `0079:1846` support years ago because this family needed special multi-input handling. citeturn0search0turn0search4
+There is also useful upstream context: Linux already gained explicit `0079:1846` support years ago because this family needed special multi-input handling.
 
 What we have here is a different layer of compatibility failure discovered on a modern system with this hardware. Publishing the exact VID:PID, failure log, descriptor behavior, patch and verification path gives other Linux users something concrete to test — and gives kernel developers enough information to decide whether the workaround belongs upstream, needs refinement, or only applies to a particular firmware revision.
 

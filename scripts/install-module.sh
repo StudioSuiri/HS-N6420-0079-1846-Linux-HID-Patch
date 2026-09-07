@@ -20,6 +20,32 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+ASSUME_YES=0
+if [ "${1:-}" = "-y" ] || [ "${1:-}" = "--yes" ]; then
+    ASSUME_YES=1
+fi
+
+echo "This script will:"
+echo " 1. Back up the running kernel's stock usbhid driver in ${TARGET_DIR}/"
+echo " 2. Install the locally built patched usbhid module into ${TARGET_DIR}/"
+echo " 3. Run depmod -a to update module dependency maps"
+echo " 4. Safely reload the usbhid kernel module in memory"
+echo " 5. Update the initramfs to maintain persistence across reboots"
+echo
+
+if [ "$ASSUME_YES" -eq 0 ]; then
+    read -r -p "Do you want to proceed with installing the module? [y/N] " response
+    case "$response" in
+        [yY][eE][sS]|[yY])
+            echo "Proceeding with installation..."
+            ;;
+        *)
+            echo "Installation cancelled by user."
+            exit 0
+            ;;
+    esac
+fi
+
 if [ ! -f "${BUILD_DIR}/usbhid.ko" ]; then
     echo "ERROR: ${BUILD_DIR}/usbhid.ko not found."
     echo "Please run './scripts/build-module.sh' first."

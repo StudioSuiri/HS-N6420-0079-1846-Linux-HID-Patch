@@ -17,6 +17,31 @@ if [ "$EUID" -ne 0 ]; then
     exit 1
 fi
 
+ASSUME_YES=0
+if [ "${1:-}" = "-y" ] || [ "${1:-}" = "--yes" ]; then
+    ASSUME_YES=1
+fi
+
+echo "This script will:"
+echo " 1. Restore the original stock usbhid module from backup (.orig) in ${TARGET_DIR}/"
+echo " 2. Run depmod -a to refresh module dependency maps"
+echo " 3. Safely reload the stock usbhid module into memory"
+echo " 4. Update the initramfs to persist stock configuration across reboots"
+echo
+
+if [ "$ASSUME_YES" -eq 0 ]; then
+    read -r -p "Do you want to proceed with restoring the stock driver? [y/N] " response
+    case "$response" in
+        [yY][eE][sS]|[yY])
+            echo "Proceeding with rollback..."
+            ;;
+        *)
+            echo "Rollback cancelled by user."
+            exit 0
+            ;;
+    esac
+fi
+
 RESTORED=0
 
 # Restore uncompressed .orig
